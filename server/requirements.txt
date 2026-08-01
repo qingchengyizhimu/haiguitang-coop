@@ -1,0 +1,7 @@
+# Haiguitang Game Server - Python dependencies
+# Install: pip install -r requirements.txt
+
+# For MCP server (AI access)
+mcp>=1.0.0
+
+# No other dependencies — the game server uses only Python standard library
