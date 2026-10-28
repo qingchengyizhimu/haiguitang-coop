@@ -4,6 +4,10 @@
 
 仓库不包含真实密钥或私有题库。没有私有题库时，后端自动使用 `samples/sample_soups.json` 中的 5 道公开示例题；运行数据默认写入已被 Git 忽略的项目本地 `data/`。
 
+## GitHub Pages 前端演示
+
+[https://qingchengyizhimu.github.io/haiguitang-coop/](https://qingchengyizhimu.github.io/haiguitang-coop/) 仅为纯前端演示。页面在构建时固定启用“演示模式 / Mock”，不连接后端或真实裁判，也不提供真实双人同步；提问回答与评分不代表真实裁判结果。真实共玩仍需要后端、隔离裁判和 MCP。
+
 ## 目录
 
 ```text

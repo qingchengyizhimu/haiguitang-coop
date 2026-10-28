@@ -85,6 +85,9 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   aiName: "AI 搭档",
 };
 
+const DEMO_ONLY =
+  process.env.NEXT_PUBLIC_TURTLE_DEMO_ONLY === "true";
+
 const WEB_SOURCE =
   process.env.NEXT_PUBLIC_TURTLE_SOURCE || "standalone-web";
 
@@ -262,6 +265,13 @@ export default function Home() {
     method: "GET" | "POST" = "GET",
     body?: Record<string, unknown>,
   ) => {
+    if (DEMO_ONLY) {
+      const error = new Error(
+        "GitHub Pages 演示版不会连接任何后端。",
+      ) as ApiError;
+      error.noDemo = true;
+      throw error;
+    }
     const base = configRef.current.apiBase.replace(/\/$/, "");
     let response: Response;
     try {
@@ -471,6 +481,23 @@ export default function Home() {
     if (busy.start) return;
     setBusy((value) => ({ ...value, start: true }));
     const key = `start:${mode}:${forceNew}:${configRef.current.roomKey}`;
+    if (DEMO_ONLY) {
+      const fallback = demoState(mode, {
+        humanId: configRef.current.humanId,
+        aiId: configRef.current.aiId,
+      });
+      setPending(null);
+      releaseSettlement();
+      settlementPresentedRef.current = null;
+      queuedSettlementRef.current = null;
+      commitGame(fallback, false);
+      changeView("game");
+      setRoomMessage("演示模式 / Mock · 仅保存在当前浏览器");
+      closeDialog();
+      toast("已开始本地 Mock 演示，不连接后端");
+      setBusy((value) => ({ ...value, start: false }));
+      return;
+    }
     try {
       const data = await request("/start", "POST", {
         mode,
@@ -1055,6 +1082,27 @@ export default function Home() {
       }
       if (cached && leftSessions().includes(String(cached.session_id))) cached = null;
 
+      if (DEMO_ONLY) {
+        const demoCached =
+          cached && String(cached.session_id).startsWith("demo-")
+            ? cached
+            : null;
+        if (demoCached) {
+          commitGame(demoCached, false);
+          changeView("game");
+          setRoomMessage("演示模式 / Mock · 仅保存在当前浏览器");
+          if (isRoundClosed(demoCached)) {
+            holdSettlement(demoCached.session_id);
+            showResult(undefined, true);
+          }
+        } else {
+          commitGame(null, false);
+          changeView("welcome");
+          setRoomMessage("演示模式 / Mock · 不连接后端或同步房间");
+        }
+        return;
+      }
+
       if (cached && isRoundClosed(cached)) {
         commitGame(cached, !String(cached.session_id).startsWith("demo-"));
         changeView("game");
@@ -1112,7 +1160,7 @@ export default function Home() {
   }, [realSession, view, game?.session_id, config.pollMs]);
 
   useEffect(() => {
-    if (view !== "lobby" || !config.autoJoin) return;
+    if (DEMO_ONLY || view !== "lobby" || !config.autoJoin) return;
     const timer = window.setInterval(
       () => void discoverActive(true, false),
       Math.max(1200, config.pollMs),
@@ -1194,16 +1242,27 @@ export default function Home() {
               规则
             </button>
           )}
-          <button
-            className="icon-button"
-            onClick={() => openDialog({ kind: "settings" })}
-            aria-label="连接设置"
-            title="连接设置"
-          >
-            ⚙
-          </button>
+          {DEMO_ONLY ? (
+            <span className="demo-header-chip">纯前端演示</span>
+          ) : (
+            <button
+              className="icon-button"
+              onClick={() => openDialog({ kind: "settings" })}
+              aria-label="连接设置"
+              title="连接设置"
+            >
+              ⚙
+            </button>
+          )}
         </nav>
       </header>
+
+      {DEMO_ONLY && (
+        <aside className="demo-banner" role="status">
+          <strong>演示模式 / Mock，不代表真实裁判结果</strong>
+          <span>仅使用浏览器内置示例，不连接后端，不提供真实双人同步。</span>
+        </aside>
+      )}
 
       {view === "welcome" && (
         <section className="welcome-screen page-enter">
@@ -1215,7 +1274,9 @@ export default function Home() {
               两个人的推理现场。
             </h1>
             <p className="welcome-lead">
-              人类在网页操作，AI 通过 MCP 参与。双方共享同一个房间、同一份日志和同一场结算。
+              {DEMO_ONLY
+                ? "这是可在手机体验的纯前端 Mock：提问、提示与评分均为本地预设，不连接真实裁判。"
+                : "人类在网页操作，AI 通过 MCP 参与。双方共享同一个房间、同一份日志和同一场结算。"}
             </p>
             <div className="welcome-actions">
               <button
@@ -1232,9 +1293,9 @@ export default function Home() {
               </button>
             </div>
             <div className="feature-line" aria-label="产品特性">
-              <span>共享房间</span>
+              <span>{DEMO_ONLY ? "纯前端" : "共享房间"}</span>
               <i />
-              <span>断点恢复</span>
+              <span>{DEMO_ONLY ? "本地 Mock" : "断点恢复"}</span>
               <i />
               <span>三维评分</span>
             </div>
@@ -1267,7 +1328,11 @@ export default function Home() {
           <div className="section-heading">
             <p className="eyebrow">CHOOSE YOUR PACE</p>
             <h1>今晚，想怎么推理？</h1>
-            <p>先选择通关节奏。网页和 AI 任一方开局，另一方都会从共享房间同步。</p>
+            <p>
+              {DEMO_ONLY
+                ? "选择节奏后即可体验本地示例；不会连接主持人、裁判或其他玩家。"
+                : "先选择通关节奏。网页和 AI 任一方开局，另一方都会从共享房间同步。"}
+            </p>
           </div>
 
           <div className="mode-grid">
@@ -1317,7 +1382,7 @@ export default function Home() {
             <div className="room-status">
               <span className="status-dot" />
               <div>
-                <b>共享房间</b>
+                <b>{DEMO_ONLY ? "本地 Mock" : "共享房间"}</b>
                 <p>{roomMessage}</p>
               </div>
             </div>
@@ -1326,34 +1391,44 @@ export default function Home() {
               disabled={busy.start}
               onClick={() => void startGame(false)}
             >
-              {busy.start ? "主持人正在抽题…" : "抽取一碗汤"}
+              {busy.start
+                ? "正在准备示例…"
+                : DEMO_ONLY
+                  ? "开始本地演示"
+                  : "抽取一碗汤"}
               {!busy.start && <span>→</span>}
             </button>
-            <div className="join-divider">
-              <span>或加入已有游戏</span>
-            </div>
-            <form
-              className="join-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void joinSession(joinId);
-              }}
-            >
-              <label htmlFor="session-input">Session ID</label>
-              <input
-                id="session-input"
-                value={joinId}
-                onChange={(event) => setJoinId(event.target.value)}
-                inputMode="numeric"
-                placeholder="例如：21"
-                autoComplete="off"
-              />
-              <button disabled={busy.join}>{busy.join ? "加入中…" : "加入"}</button>
-            </form>
+            {!DEMO_ONLY && (
+              <>
+                <div className="join-divider">
+                  <span>或加入已有游戏</span>
+                </div>
+                <form
+                  className="join-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void joinSession(joinId);
+                  }}
+                >
+                  <label htmlFor="session-input">Session ID</label>
+                  <input
+                    id="session-input"
+                    value={joinId}
+                    onChange={(event) => setJoinId(event.target.value)}
+                    inputMode="numeric"
+                    placeholder="例如：21"
+                    autoComplete="off"
+                  />
+                  <button disabled={busy.join}>{busy.join ? "加入中…" : "加入"}</button>
+                </form>
+              </>
+            )}
           </div>
 
           <p className="lobby-footnote">
-            API 密钥、汤底与评分关键点只应保存在后端；独立前端不会接触这些秘密。
+            {DEMO_ONLY
+              ? "此页面不含 API 密钥、私有题库或真实汤底；真实共玩需要后端、隔离裁判与 MCP。"
+              : "API 密钥、汤底与评分关键点只应保存在后端；独立前端不会接触这些秘密。"}
           </p>
         </section>
       )}
@@ -1973,7 +2048,11 @@ export default function Home() {
 
       <footer className="site-footer">
         <span>HAIGUITANG · OPEN CO-OP FRONTEND</span>
-        <span>界面状态以共享后端 Session 为准</span>
+        <span>
+          {DEMO_ONLY
+            ? "Mock 状态仅保存在当前浏览器"
+            : "界面状态以共享后端 Session 为准"}
+        </span>
       </footer>
     </main>
   );

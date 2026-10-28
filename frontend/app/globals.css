@@ -193,6 +193,46 @@ button:disabled {
   gap: 10px;
 }
 
+.demo-header-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(84, 58, 99, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 248, 238, 0.72);
+  color: var(--plum);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  backdrop-filter: blur(12px);
+}
+
+.demo-banner {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  width: min(1180px, calc(100% - 48px));
+  margin: 4px auto 0;
+  padding: 12px 18px;
+  border: 1px solid rgba(84, 58, 99, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 248, 238, 0.84);
+  box-shadow: 0 12px 32px rgba(33, 22, 45, 0.09);
+  color: var(--plum);
+  font-size: 13px;
+  text-align: center;
+  backdrop-filter: blur(14px);
+}
+
+.demo-banner span {
+  color: var(--ink-soft);
+}
+
 .quiet-button,
 .icon-button {
   border: 1px solid rgba(76, 51, 64, 0.12);
