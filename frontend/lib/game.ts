@@ -513,7 +513,7 @@ export function demoAnswer(question: string) {
   if (/固定|熟悉|认识|约定|信号/.test(question)) return { answer: "是" };
   if (/照明|坏|故障|忘/.test(question)) return { answer: "否" };
   if (/顾客|客人|取|东西|面包/.test(question)) {
-    return { answer: "是也不是" };
+    return { answer: "部分相关" };
   }
   return { answer: "无关" };
 }

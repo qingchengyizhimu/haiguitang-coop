@@ -80,10 +80,13 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   fallbackDemo: true,
   autoJoin: true,
   humanId: "xinxin",
-  aiId: "azhi",
+  aiId: process.env.NEXT_PUBLIC_TURTLE_AI_PLAYER_ID || "azhi",
   humanName: "玩家",
   aiName: "AI 搭档",
 };
+
+const WEB_SOURCE =
+  process.env.NEXT_PUBLIC_TURTLE_SOURCE || "standalone-web";
 
 const now = () =>
   new Date().toLocaleTimeString("zh-CN", {
@@ -107,7 +110,7 @@ function loadJson<T>(key: string, fallback: T): T {
 function answerClass(answer?: string) {
   if (answer === "是") return "answer--yes";
   if (answer === "否") return "answer--no";
-  if (answer === "是也不是") return "answer--mixed";
+  if (answer === "部分相关" || answer === "是也不是") return "answer--mixed";
   if (answer === "驳回") return "answer--reject";
   return "answer--neutral";
 }
@@ -391,7 +394,7 @@ export default function Home() {
         session_id: sessionId,
         room_key: configRef.current.roomKey,
         player: configRef.current.humanId,
-        source: "standalone-web",
+        source: WEB_SOURCE,
         request_id: createRequestId(),
       });
       return true;
@@ -475,7 +478,7 @@ export default function Home() {
         reuse_active: !forceNew,
         force_new: forceNew,
         player: configRef.current.humanId,
-        source: "standalone-web",
+        source: WEB_SOURCE,
         request_id: requestIdFor(key),
       });
       const normalized = normalizeState(data, undefined, mode, {
@@ -600,7 +603,7 @@ export default function Home() {
         const data = await request("/ask", "POST", {
           session_id: current.session_id,
           player: configRef.current.humanId,
-          source: "standalone-web",
+          source: WEB_SOURCE,
           request_id: requestId,
           question,
         });
@@ -649,7 +652,7 @@ export default function Home() {
         next = appendLogIfMissing(next, {
           type: "question",
           player: configRef.current.humanId,
-          source: "standalone-web",
+          source: WEB_SOURCE,
           request_id: requestId,
           question,
           text: question,
@@ -690,7 +693,7 @@ export default function Home() {
         const data = await request("/hint", "POST", {
           session_id: current.session_id,
           player: configRef.current.humanId,
-          source: "standalone-web",
+          source: WEB_SOURCE,
           request_id: requestId,
         });
         if (
@@ -780,7 +783,7 @@ export default function Home() {
         const data = await request("/submit", "POST", {
           session_id: current.session_id,
           player: configRef.current.humanId,
-          source: "standalone-web",
+          source: WEB_SOURCE,
           request_id: requestId,
           answer: answerText,
         });
@@ -870,7 +873,7 @@ export default function Home() {
       next = appendLogIfMissing(next, {
         type: "submit",
         player: configRef.current.humanId,
-        source: "standalone-web",
+        source: WEB_SOURCE,
         request_id: requestId,
         text: `已提交完整推理 · ${submission.total} 分 ${submission.rank}`,
         submitted_answer: answerText,
@@ -912,7 +915,7 @@ export default function Home() {
           session_id: current.session_id,
           room_key: configRef.current.roomKey,
           player: configRef.current.humanId,
-          source: "standalone-web",
+          source: WEB_SOURCE,
           request_id: requestIdFor(key),
         });
         if (
@@ -952,7 +955,7 @@ export default function Home() {
           session_id: current.session_id,
           room_key: configRef.current.roomKey,
           player: configRef.current.humanId,
-          source: "standalone-web",
+          source: WEB_SOURCE,
           request_id: createRequestId(),
         });
       }
@@ -1010,10 +1013,10 @@ export default function Home() {
     const next: RuntimeConfig = {
       ...config,
       apiBase: config.apiBase.trim() || "/api/game",
-      roomKey: config.roomKey.trim() || "haiguitang-main",
+      roomKey: config.roomKey.trim() || DEFAULT_CONFIG.roomKey,
       pollMs: Math.max(1200, Number(config.pollMs) || 3000),
       humanId: config.humanId.trim() || "xinxin",
-      aiId: config.aiId.trim() || "azhi",
+      aiId: config.aiId.trim() || DEFAULT_CONFIG.aiId,
       humanName: config.humanName.trim() || "玩家",
       aiName: config.aiName.trim() || "AI 搭档",
     };

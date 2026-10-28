@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Haiguitang MCP — wraps game API for AI access (open source version)"""
-import json, uuid, urllib.request
+import json, os, uuid, urllib.error, urllib.request
 from mcp.server.fastmcp import FastMCP
 
-GAME_API = "http://127.0.0.1:8777"  # 改成你的后端地址
-PORT = 8778
+GAME_API = os.environ.get(
+    "MCP_REST_API_URL", os.environ.get("GAME_API_URL", "http://127.0.0.1:8777")
+).rstrip("/")
+MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
+MCP_PORT = int(os.environ.get("MCP_PORT", "8778"))
+DEFAULT_ROOM_KEY = os.environ.get("TURTLE_ROOM_KEY", "haiguitang-main")
+AI_PLAYER_ID = os.environ.get("AI_PLAYER_ID", "azhi")
+MCP_SOURCE = os.environ.get("MCP_SOURCE", "haiguitang-mcp")
 
 AI_PLAY_NOTICE = """双人共猜规则：这是双人共猜推理游戏，不是单机解题。
 1. 每次回复最多执行一个改变状态的操作
@@ -42,26 +48,36 @@ def inject_brake(result, brake_text, action="WAIT_FOR_HUMAN"):
 
 mcp = FastMCP(
     "haiguitang-mcp",
-    host="0.0.0.0",
-    port=PORT,
+    host=MCP_HOST,
+    port=MCP_PORT,
     streamable_http_path="/",
     instructions=AI_PLAY_NOTICE
 )
 
 def game_post(path, body):
     if "player" not in body:
-        body["player"] = "azhi"
-    body.setdefault("source", "rikkahub-mcp")
+        body["player"] = AI_PLAYER_ID
+    body.setdefault("source", MCP_SOURCE)
     body.setdefault("request_id", str(uuid.uuid4()))
     data = json.dumps(body).encode()
     req = urllib.request.Request(f"{GAME_API}/{path}", data=data,
         headers={"Content-Type": "application/json"})
-    resp = urllib.request.urlopen(req, timeout=30)
-    return json.loads(resp.read())
+    try:
+        resp = urllib.request.urlopen(req, timeout=30)
+        return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        return {"error": "游戏后端请求失败", "status": exc.code, "retryable": exc.code >= 500}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return {"error": "游戏后端暂时不可用", "retryable": True}
 
 def game_get(path):
-    resp = urllib.request.urlopen(f"{GAME_API}/{path}", timeout=10)
-    data = json.loads(resp.read())
+    try:
+        resp = urllib.request.urlopen(f"{GAME_API}/{path}", timeout=10)
+        data = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        return {"error": "游戏后端请求失败", "status": exc.code, "retryable": exc.code >= 500}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return {"error": "游戏后端暂时不可用", "retryable": True}
     if isinstance(data, dict) and path.startswith(("status", "active")):
         data["_ai_play_notice_version"] = "1.0"
         data["_ai_play_notice"] = "共同推理优先；一次只做一个动作，随后回到对话；提示/提交/揭底/下一题先确认。"
@@ -69,7 +85,7 @@ def game_get(path):
 
 @mcp.tool(description="向海龟汤主持人提出一个是否问题。每次调用后必须停止本轮工具调用，把结果告诉人类搭档并等待讨论；不得在同一条助手回复中连续提问。")
 def haiguitang_ask(session_id: int, question: str) -> str:
-    result = game_post("ask", {"session_id": session_id, "player": "azhi", "question": question})
+    result = game_post("ask", {"session_id": session_id, "player": AI_PLAYER_ID, "question": question})
     result = inject_brake(result, AI_BRAKE_REJECTED if result.get("answer") == "驳回" else AI_BRAKE_ASK)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -80,7 +96,7 @@ def haiguitang_hint(session_id: int) -> str:
 
 @mcp.tool(description="提交最终推理（孤注一掷）。提交后必须停止本轮工具调用，把评分告诉人类搭档；不得自行继续操作。")
 def haiguitang_submit(session_id: int, answer: str) -> str:
-    result = game_post("submit", {"session_id": session_id, "player": "azhi", "answer": answer})
+    result = game_post("submit", {"session_id": session_id, "player": AI_PLAYER_ID, "answer": answer})
     return json.dumps(inject_brake(result, AI_BRAKE_SUBMIT), ensure_ascii=False, indent=2)
 
 @mcp.tool(description="公布汤底（必须先得到人类搭档同意）。揭底后游戏结束，不得再操作本局。")
@@ -95,18 +111,18 @@ def haiguitang_status(session_id: int) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 @mcp.tool()
-def haiguitang_start(mode: str = "normal", force_new: bool = False, room_key: str = "haiguitang-main") -> str:
+def haiguitang_start(mode: str = "normal", force_new: bool = False, room_key: str = DEFAULT_ROOM_KEY) -> str:
     result = game_post("start", {"mode": mode, "room_key": room_key, "reuse_active": True, "force_new": force_new})
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 @mcp.tool()
-def haiguitang_next(mode: str = "normal", previous_session_id: int = 0, room_key: str = "haiguitang-main") -> str:
+def haiguitang_next(mode: str = "normal", previous_session_id: int = 0, room_key: str = DEFAULT_ROOM_KEY) -> str:
     body = {"mode": mode, "room_key": room_key, "reuse_active": False, "force_new": True}
     if previous_session_id: body["previous_session_id"] = previous_session_id
     return json.dumps(game_post("start", body), ensure_ascii=False, indent=2)
 
 @mcp.tool()
-def haiguitang_current(room_key: str = "haiguitang-main") -> str:
+def haiguitang_current(room_key: str = DEFAULT_ROOM_KEY) -> str:
     result = game_get(f"active?room_key={room_key}")
     return json.dumps(result, ensure_ascii=False, indent=2)
 

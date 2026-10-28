@@ -1,0 +1,23 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+frontend/.env.local
+
+# Runtime data (may contain private soup bottoms and player sessions)
+data/
+
+# Dependencies and generated caches
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/.wrangler/
+coverage/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+*.swp
