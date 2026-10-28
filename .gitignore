@@ -18,12 +18,6 @@ dist/
 .vinext/
 .sites-runtime/
 *.tsbuildinfo
-dist/
-.next/
-.wrangler/
-.vinext/
-.sites-runtime/
-*.tsbuildinfo
 coverage/
 __pycache__/
 *.py[cod]
