@@ -10,15 +10,11 @@ import {
   appendLogIfMissing,
   bestSubmission,
   createRequestId,
-  demoAnswer,
-  demoHints,
-  demoState,
   hintText,
   isRoundClosed,
   modeNames,
   normalizeState,
   normalizeSubmission,
-  rankFromScore,
   type GameMode,
   type GameState,
   type Submission,
@@ -49,7 +45,6 @@ interface RuntimeConfig {
   apiBase: string;
   roomKey: string;
   pollMs: number;
-  fallbackDemo: boolean;
   autoJoin: boolean;
   humanId: string;
   aiId: string;
@@ -74,19 +69,17 @@ const STORAGE = {
 };
 
 const DEFAULT_CONFIG: RuntimeConfig = {
-  apiBase: process.env.NEXT_PUBLIC_TURTLE_API_BASE || "/api/game",
-  roomKey: process.env.NEXT_PUBLIC_TURTLE_ROOM_KEY || "haiguitang-main",
+  apiBase: "/api/game",
+  roomKey: "haiguitang-main",
   pollMs: 3000,
-  fallbackDemo: true,
   autoJoin: true,
   humanId: "xinxin",
-  aiId: process.env.NEXT_PUBLIC_TURTLE_AI_PLAYER_ID || "azhi",
+  aiId: "azhi",
   humanName: "玩家",
   aiName: "AI 搭档",
 };
 
-const WEB_SOURCE =
-  process.env.NEXT_PUBLIC_TURTLE_SOURCE || "standalone-web";
+const WEB_SOURCE = "sites-web";
 
 const now = () =>
   new Date().toLocaleTimeString("zh-CN", {
@@ -116,9 +109,13 @@ function answerClass(answer?: string) {
 }
 
 export default function Home() {
-  const [config, setConfig] = useState<RuntimeConfig>(() =>
-    loadJson(STORAGE.config, DEFAULT_CONFIG),
-  );
+  const [config, setConfig] = useState<RuntimeConfig>(() => ({
+    ...DEFAULT_CONFIG,
+    ...loadJson(STORAGE.config, DEFAULT_CONFIG),
+    apiBase: "/api/game",
+    humanId: "xinxin",
+    aiId: "azhi",
+  }));
   const [view, setView] = useState<View>("welcome");
   const [selectedMode, setSelectedMode] = useState<GameMode>(() => {
     if (typeof window === "undefined") return "normal";
@@ -180,7 +177,9 @@ export default function Home() {
       return;
     }
     window.localStorage.setItem(STORAGE.session, String(next.session_id));
-    window.localStorage.setItem(STORAGE.state, JSON.stringify(next));
+    // Server state (especially a revealed bottom) is never persisted in the
+    // browser. Refresh recovery re-fetches this owner-scoped Session from D1.
+    window.localStorage.removeItem(STORAGE.state);
   };
 
   const setPending = (next: GameState | null) => {
@@ -262,7 +261,7 @@ export default function Home() {
     method: "GET" | "POST" = "GET",
     body?: Record<string, unknown>,
   ) => {
-    const base = configRef.current.apiBase.replace(/\/$/, "");
+    const base = "/api/game";
     let response: Response;
     try {
       response = await fetch(`${base}${path}`, {
@@ -505,30 +504,7 @@ export default function Home() {
       toast("主持人已经放出汤面");
     } catch (error) {
       const apiError = error as ApiError;
-      const canUseDemo =
-        configRef.current.fallbackDemo &&
-        !apiError.noDemo &&
-        (!apiError.status ||
-          apiError.status === 404 ||
-          apiError.status === 405 ||
-          apiError.status >= 500);
-      if (!canUseDemo) {
-        toast(apiError.message || "无法开始游戏");
-        return;
-      }
-      const fallback = demoState(mode, {
-        humanId: configRef.current.humanId,
-        aiId: configRef.current.aiId,
-      });
-      clearRequestId(key);
-      setPending(null);
-      releaseSettlement();
-      settlementPresentedRef.current = null;
-      commitGame(fallback, false);
-      changeView("game");
-      setRoomMessage("本地演示模式 · 不会写入后端");
-      closeDialog();
-      toast("后端未连接，已进入交互演示");
+      toast(apiError.message || "无法开始游戏");
     } finally {
       setBusy((value) => ({ ...value, start: false }));
     }
@@ -592,6 +568,10 @@ export default function Home() {
     const current = gameRef.current;
     const question = questionDraft.trim();
     if (!current || !question || busy.ask) return;
+    if (!realSessionRef.current) {
+      toast("请先通过同源 API 开始或恢复一局");
+      return;
+    }
     const key = `ask:${current.session_id}:${question}`;
     const requestId = requestIdFor(key);
     setBusy((value) => ({ ...value, ask: true }));
@@ -599,49 +579,26 @@ export default function Home() {
       let answer = "";
       let reason = "";
       let next = current;
-      if (realSessionRef.current) {
-        const data = await request("/ask", "POST", {
+      const data = await request("/ask", "POST", {
           session_id: current.session_id,
           player: configRef.current.humanId,
           source: WEB_SOURCE,
           request_id: requestId,
           question,
         });
-        if (
-          !gameRef.current ||
-          String(gameRef.current.session_id) !== String(current.session_id)
-        ) {
-          toast("房间已切换，旧房间的回答不会写入新局");
-          return;
-        }
-        answer = String(data.answer || "是也不是");
-        reason = String(data.reason || "");
-        next = normalizeState(data, current, selectedMode, {
-          humanId: configRef.current.humanId,
-          aiId: configRef.current.aiId,
-        });
-      } else {
-        const result = demoAnswer(question);
-        answer = result.answer;
-        reason = result.reason || "";
-        if (answer !== "驳回") {
-          next = {
-            ...current,
-            questions_left: {
-              ...current.questions_left,
-              [configRef.current.humanId]:
-                current.questions_left[configRef.current.humanId] == null
-                  ? null
-                  : Math.max(
-                      0,
-                      Number(
-                        current.questions_left[configRef.current.humanId],
-                      ) - 1,
-                    ),
-            },
-          };
-        }
+      if (
+        !gameRef.current ||
+        String(gameRef.current.session_id) !== String(current.session_id)
+      ) {
+        toast("房间已切换，旧房间的回答不会写入新局");
+        return;
       }
+      answer = String(data.answer || "是也不是");
+      reason = String(data.reason || "");
+      next = normalizeState(data, current, selectedMode, {
+        humanId: configRef.current.humanId,
+        aiId: configRef.current.aiId,
+      });
       const semanticExists = next.questions_log.some(
         (item) =>
           item.player === configRef.current.humanId &&
@@ -682,6 +639,10 @@ export default function Home() {
   const takeHint = async () => {
     const current = gameRef.current;
     if (!current || busy.hint) return;
+    if (!realSessionRef.current) {
+      toast("请先通过同源 API 开始或恢复一局");
+      return;
+    }
     const expectedIndex = current.hints_used + 1;
     const key = `hint:${current.session_id}:${expectedIndex}`;
     const requestId = requestIdFor(key);
@@ -689,53 +650,29 @@ export default function Home() {
     try {
       let content = "";
       let next = current;
-      if (realSessionRef.current) {
-        const data = await request("/hint", "POST", {
+      const data = await request("/hint", "POST", {
           session_id: current.session_id,
           player: configRef.current.humanId,
           source: WEB_SOURCE,
           request_id: requestId,
         });
-        if (
-          !gameRef.current ||
-          String(gameRef.current.session_id) !== String(current.session_id)
-        ) {
-          toast("房间已切换，旧房间的提示不会写入新局");
-          return;
-        }
-        content =
-          hintText(data.hint) ||
-          hintText(data.hint_content) ||
-          hintText(data.hint_text) ||
-          hintText(data.content) ||
-          hintText(data.latest_hint);
-        next = normalizeState(data, current, selectedMode, {
-          humanId: configRef.current.humanId,
-          aiId: configRef.current.aiId,
-        });
-      } else {
-        content = demoHints[Math.min(current.hints_used, demoHints.length - 1)];
-        next = normalizeState(
-          {
-            hints_used: current.hints_used + 1,
-            revealed_hints: [
-              ...current.revealed_hints,
-              {
-                index: expectedIndex,
-                hint: content,
-                player: configRef.current.humanId,
-                time: now(),
-              },
-            ],
-          },
-          current,
-          selectedMode,
-          {
-            humanId: configRef.current.humanId,
-            aiId: configRef.current.aiId,
-          },
-        );
+      if (
+        !gameRef.current ||
+        String(gameRef.current.session_id) !== String(current.session_id)
+      ) {
+        toast("房间已切换，旧房间的提示不会写入新局");
+        return;
       }
+      content =
+        hintText(data.hint) ||
+        hintText(data.hint_content) ||
+        hintText(data.hint_text) ||
+        hintText(data.content) ||
+        hintText(data.latest_hint);
+      next = normalizeState(data, current, selectedMode, {
+        humanId: configRef.current.humanId,
+        aiId: configRef.current.aiId,
+      });
       if (!content) {
         const newest = next.revealed_hints.find(
           (item) => item.index === expectedIndex,
@@ -765,6 +702,10 @@ export default function Home() {
     const current = gameRef.current;
     const answerText = theoryDraft.trim();
     if (!current || busy.submit) return;
+    if (!realSessionRef.current) {
+      toast("请先通过同源 API 开始或恢复一局");
+      return;
+    }
     if (answerText.length < 8) {
       openDialog({ kind: "submit", error: "请先写出较完整的推理。" });
       return;
@@ -778,71 +719,37 @@ export default function Home() {
     setBusy((value) => ({ ...value, submit: true }));
     try {
       let next = current;
-      let submission: Submission;
-      if (realSessionRef.current) {
-        const data = await request("/submit", "POST", {
+      const data = await request("/submit", "POST", {
           session_id: current.session_id,
           player: configRef.current.humanId,
           source: WEB_SOURCE,
           request_id: requestId,
           answer: answerText,
         });
-        if (
-          !gameRef.current ||
-          String(gameRef.current.session_id) !== String(current.session_id)
-        ) {
-          toast("房间已切换，旧房间的评分不会写入新局");
-          return;
-        }
-        next = normalizeState(data, current, selectedMode, {
-          humanId: configRef.current.humanId,
-          aiId: configRef.current.aiId,
-        });
-        submission =
-          next.submissions[configRef.current.humanId] ||
-          normalizeSubmission(
-            {
-              score: data.score ?? data.overall,
-              rank: data.rank,
-              score_detail: data.score_detail ?? data.detail,
-              comment: data.comment,
-              submitted_answer: answerText,
-              request_id: requestId,
-            },
-            configRef.current.humanId,
-          )!;
-      } else {
-        const hits = ["信号", "送货", "预留", "取走", "约定"].filter((word) =>
-          answerText.includes(word),
-        ).length;
-        const keyPlot = Math.min(100, 35 + hits * 13);
-        const logic = Math.min(
-          96,
-          answerText.length > 42 ? 86 : answerText.length > 24 ? 74 : 58,
-        );
-        const detail = Math.min(
-          96,
-          38 +
-            ["面包", "灯", "店主", "取走"].filter((word) =>
-              answerText.includes(word),
-            ).length *
-              14,
-        );
-        const total = Math.round(keyPlot * 0.4 + logic * 0.3 + detail * 0.3);
-        submission = {
-          submitted: true,
-          player: configRef.current.humanId,
-          total,
-          rank: rankFromScore(total),
-          key_plot: keyPlot,
-          logic,
-          detail,
-          comment: "演示评分仅用于体验界面，正式游戏由后端主持人评分。",
-          answer: answerText,
-          request_id: requestId,
-          submitted_at: now(),
-        };
+      if (
+        !gameRef.current ||
+        String(gameRef.current.session_id) !== String(current.session_id)
+      ) {
+        toast("房间已切换，旧房间的评分不会写入新局");
+        return;
       }
+      next = normalizeState(data, current, selectedMode, {
+        humanId: configRef.current.humanId,
+        aiId: configRef.current.aiId,
+      });
+      const submission: Submission =
+        next.submissions[configRef.current.humanId] ||
+        normalizeSubmission(
+          {
+            score: data.score ?? data.overall,
+            rank: data.rank,
+            score_detail: data.score_detail ?? data.detail,
+            comment: data.comment,
+            submitted_answer: answerText,
+            request_id: requestId,
+          },
+          configRef.current.humanId,
+        )!;
 
       next = {
         ...next,
@@ -1012,11 +919,11 @@ export default function Home() {
   const saveSettings = () => {
     const next: RuntimeConfig = {
       ...config,
-      apiBase: config.apiBase.trim() || "/api/game",
+      apiBase: "/api/game",
       roomKey: config.roomKey.trim() || DEFAULT_CONFIG.roomKey,
       pollMs: Math.max(1200, Number(config.pollMs) || 3000),
-      humanId: config.humanId.trim() || "xinxin",
-      aiId: config.aiId.trim() || DEFAULT_CONFIG.aiId,
+      humanId: "xinxin",
+      aiId: "azhi",
       humanName: config.humanName.trim() || "玩家",
       aiName: config.aiName.trim() || "AI 搭档",
     };
@@ -1043,59 +950,16 @@ export default function Home() {
   useEffect(() => {
     if (bootedRef.current) return;
     bootedRef.current = true;
-    let cancelled = false;
     const boot = async () => {
-      const cachedRaw = loadJson<Record<string, unknown> | null>(STORAGE.state, null);
-      let cached: GameState | null = null;
-      if (cachedRaw?.session_id != null) {
-        cached = normalizeState(cachedRaw, undefined, selectedMode, {
-          humanId: configRef.current.humanId,
-          aiId: configRef.current.aiId,
-        });
-      }
-      if (cached && leftSessions().includes(String(cached.session_id))) cached = null;
-
-      if (cached && isRoundClosed(cached)) {
-        commitGame(cached, !String(cached.session_id).startsWith("demo-"));
-        changeView("game");
-        holdSettlement(cached.session_id);
-        showResult(undefined, true);
-        if (!String(cached.session_id).startsWith("demo-")) {
-          try {
-            const data = await request(
-              `/status?session_id=${encodeURIComponent(cached.session_id)}`,
-            );
-            if (!cancelled) {
-              const latest = normalizeState(data, cached, selectedMode, {
-                humanId: configRef.current.humanId,
-                aiId: configRef.current.aiId,
-              });
-              commitGame(latest, true);
-              showResult(undefined, true);
-            }
-          } catch {
-            // 离线时继续展示完整本地结算缓存。
-          }
-        }
-        if (configRef.current.autoJoin) await discoverActive(true, false);
-        return;
-      }
-
+      window.localStorage.removeItem(STORAGE.state);
+      const savedSession = window.localStorage.getItem(STORAGE.session)?.trim();
       if (configRef.current.autoJoin && (await discoverActive(true, false))) return;
-      if (cached) {
-        commitGame(cached, !String(cached.session_id).startsWith("demo-"));
-        changeView("game");
-        if (!String(cached.session_id).startsWith("demo-")) {
-          await joinSession(cached.session_id, { silent: true, activate: false });
-        }
-        return;
+      if (savedSession && !leftSessions().includes(savedSession)) {
+        if (await joinSession(savedSession, { silent: true, activate: false })) return;
       }
       changeView("welcome");
     };
     void boot();
-    return () => {
-      cancelled = true;
-    };
     // 启动流程只运行一次，后续配置由设置页显式修改。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1204,6 +1068,10 @@ export default function Home() {
           </button>
         </nav>
       </header>
+
+      <div className="mock-banner" role="status">
+        演示模式 / Mock，不代表真实裁判结果
+      </div>
 
       {view === "welcome" && (
         <section className="welcome-screen page-enter">
@@ -1344,8 +1212,8 @@ export default function Home() {
                 id="session-input"
                 value={joinId}
                 onChange={(event) => setJoinId(event.target.value)}
-                inputMode="numeric"
-                placeholder="例如：21"
+                inputMode="text"
+                placeholder="粘贴 Session ID"
                 autoComplete="off"
               />
               <button disabled={busy.join}>{busy.join ? "加入中…" : "加入"}</button>
@@ -1353,7 +1221,7 @@ export default function Home() {
           </div>
 
           <p className="lobby-footnote">
-            API 密钥、汤底与评分关键点只应保存在后端；独立前端不会接触这些秘密。
+            汤底只保存在 Worker 服务端；浏览器与 MCP 通过同一 Sites 身份共享进度。
           </p>
         </section>
       )}
@@ -1628,22 +1496,12 @@ export default function Home() {
 
             {dialog.kind === "settings" && (
               <>
-                <p className="eyebrow">CONNECTION SETTINGS</p>
-                <h2 id="dialog-title">连接你的主持人</h2>
+                <p className="eyebrow">GAME SETTINGS</p>
+                <h2 id="dialog-title">游戏与显示设置</h2>
                 <p className="dialog-lead">
-                  设置只保存在本浏览器。密钥、汤底与评分关键点不要写进前端。
+                  API 固定使用同源 /api/game，身份由 ChatGPT Sites 注入。
                 </p>
                 <div className="settings-grid">
-                  <label className="field field--full">
-                    <span>API 根地址</span>
-                    <input
-                      value={config.apiBase}
-                      onChange={(event) =>
-                        setConfig((value) => ({ ...value, apiBase: event.target.value }))
-                      }
-                      placeholder="/api/game"
-                    />
-                  </label>
                   <label className="field field--full">
                     <span>共享房间 key</span>
                     <input
@@ -1652,24 +1510,6 @@ export default function Home() {
                         setConfig((value) => ({ ...value, roomKey: event.target.value }))
                       }
                       placeholder="haiguitang-main"
-                    />
-                  </label>
-                  <label className="field">
-                    <span>人类玩家 ID</span>
-                    <input
-                      value={config.humanId}
-                      onChange={(event) =>
-                        setConfig((value) => ({ ...value, humanId: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>AI 玩家 ID</span>
-                    <input
-                      value={config.aiId}
-                      onChange={(event) =>
-                        setConfig((value) => ({ ...value, aiId: event.target.value }))
-                      }
                     />
                   </label>
                   <label className="field">
@@ -1720,17 +1560,7 @@ export default function Home() {
                       <span>自动寻找共享房间</span>
                     </label>
                     <label>
-                      <input
-                        type="checkbox"
-                        checked={config.fallbackDemo}
-                        onChange={(event) =>
-                          setConfig((value) => ({
-                            ...value,
-                            fallbackDemo: event.target.checked,
-                          }))
-                        }
-                      />
-                      <span>离线时进入演示模式</span>
+                      <span>固定同源 API · Sites 身份隔离</span>
                     </label>
                   </div>
                 </div>

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "海龟汤 · 人机共游版",
-  description: "让人类网页玩家与 AI 通过同一个 Session 共同游玩的海龟汤开源前端。",
+  description: "由 ChatGPT Sites 托管、网页与 MCP 共享进度的海龟汤 Mock 全栈演示。",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

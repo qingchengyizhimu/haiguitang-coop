@@ -143,6 +143,22 @@ button:disabled {
   padding: 30px 0 14px;
 }
 
+.mock-banner {
+  position: relative;
+  z-index: 5;
+  width: fit-content;
+  margin: 0 auto 18px;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 184, 77, 0.55);
+  border-radius: 999px;
+  background: rgba(93, 52, 8, 0.72);
+  color: #ffe1a3;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  box-shadow: 0 8px 24px rgba(20, 10, 2, 0.22);
+}
+
 .brand {
   display: inline-flex;
   align-items: center;

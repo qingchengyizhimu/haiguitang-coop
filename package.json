@@ -1,8 +1,8 @@
 {
   "name": "haiguitang-coop-web",
   "version": "1.0.0",
-  "private": false,
-  "description": "A standalone open-source Turtle Soup co-op frontend for human and AI players.",
+  "private": true,
+  "description": "Private ChatGPT Sites Turtle Soup MVP with same-origin REST, D1, and MCP.",
   "license": "MIT",
   "engines": {
     "node": ">=22.13.0"
@@ -11,7 +11,8 @@
     "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vite",
     "build": "bash scripts/build-verified.sh",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
-    "test": "npm run lint && npm run test:state && npm run build && node --test tests/rendered-html.test.mjs",
+    "test": "npm run lint && npm run test:state && npm run build && node --test tests/rendered-html.test.mjs tests/worker.integration.test.mjs",
+    "test:worker": "npm run build && node --test tests/worker.integration.test.mjs",
     "test:state": "bash scripts/test-state.sh",
     "validate:artifact": "bash scripts/validate-artifact.sh",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
